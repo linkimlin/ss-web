@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>跨设备文字文件传输</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; max-width: 800px; margin: 30px auto; padding: 0 20px; color: #1f2937; }
+        .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 20px; background: #fff; }
+        h2 { margin-bottom: 16px; font-size: 20px; font-weight: 600; }
+        h3 { margin: 16px 0 10px; font-size: 16px; font-weight: 600; }
+        #qrcode { display: flex; justify-content: center; margin: 20px 0; }
+        textarea { width: 100%; height: 180px; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; resize: vertical; font-family: inherit; }
+        .btn { width: 100%; padding: 12px; margin-top: 12px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
+        .btn:hover { background: #1d4ed8; }
+        .btn:disabled { background: #93c5fd; cursor: not-allowed; }
+        .tip { color: #6b7280; font-size: 14px; margin-top: 12px; text-align: center; }
+        .result-box { min-height: 80px; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; white-space: pre-wrap; word-break: break-all; background: #f9fafb; }
+        .file-area { border: 2px dashed #d1d5db; border-radius: 8px; padding: 40px 20px; text-align: center; margin-top: 16px; cursor: pointer; background: #f9fafb; }
+        .file-area:hover { border-color: #2563eb; background: #eff6ff; }
+        .progress-bar { width: 100%; height: 8px; background: #e5e7eb; border-radius: 4px; margin-top: 12px; overflow: hidden; display: none; }
+        .progress-fill { height: 100%; width: 0%; background: #2563eb; transition: width 0.2s; }
+        .download-btn { display: inline-block; padding: 10px 20px; background: #059669; color: white; border-radius: 8px; text-decoration: none; margin-top: 10px; }
+        .download-btn:hover { background: #047857; }
+        .section-divider { margin: 20px 0; border-top: 1px solid #e5e7eb; }
+
+        .tab-nav { display: flex; border-radius: 8px; overflow: hidden; border: 1px solid #e5e7eb; margin-bottom: 20px; }
+        .tab-btn { flex: 1; padding: 12px 0; background: #f9fafb; border: none; cursor: pointer; font-size: 15px; color: #6b7280; }
+        .tab-btn.active { background: #2563eb; color: white; font-weight: 500; }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        .online-info { font-size: 13px; color: #6b7280; text-align: center; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2 id="page-title">跨设备传输工具</h2>
+
+        <!-- 电脑端接收面板 -->
+        <div id="pc-panel" style="display: none;">
+            <div class="tip">手机扫码发送文字或文件，内容自动同步到本页面</div>
+            <div id="qrcode"></div>
+            <div class="tip">房间号：<span id="room-id"></span></div>
+            <div class="online-info">当前在线使用：<span id="online-count">0</span> 人</div>
+
+            <div class="section-divider"></div>
+            <h3>接收到的文字</h3>
+            <div id="text-result" class="result-box">等待发送...</div>
+
+            <div class="section-divider"></div>
+            <h3>接收到的文件</h3>
+            <div id="file-result">暂无文件</div>
+        </div>
+
+        <!-- 手机端发送面板 -->
+        <div id="mobile-panel" style="display: none;">
+            <div class="tab-nav">
+                <button class="tab-btn active" onclick="switchTab('text')">发送文字</button>
+                <button class="tab-btn" onclick="switchTab('file')">发送文件</button>
+            </div>
+
+            <div id="tab-text" class="tab-panel active">
+                <textarea id="text-input" placeholder="输入要传输的文字..."></textarea>
+                <button class="btn" onclick="submitText()">发送文字</button>
+                <div id="text-tip" class="tip"></div>
+            </div>
+
+            <div id="tab-file" class="tab-panel">
+                <div class="file-area" onclick="document.getElementById('file-input').click()">
+                    点击选择文件（最大50MB）
+                    <input type="file" id="file-input" style="display: none;">
+                </div>
+                <div class="progress-bar" id="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <div id="file-tip" class="tip"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ========== 替换为你的 Render 后端地址 ==========
+        const BACKEND_URL = "https://你的后端地址.onrender.com";
+        // =============================================
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomId = urlParams.get('room');
+        const pcPanel = document.getElementById('pc-panel');
+        const mobilePanel = document.getElementById('mobile-panel');
+
+        function switchTab(type) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+            if (type === 'text') {
+                document.querySelectorAll('.tab-btn')[0].classList.add('active');
+                document.getElementById('tab-text').classList.add('active');
+            } else {
+                document.querySelectorAll('.tab-btn')[1].classList.add('active');
+                document.getElementById('tab-file').classList.add('active');
+            }
+        }
+
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // 电脑端逻辑
+        if (!roomId) {
+            document.getElementById('page-title').textContent = "电脑端 · 接收";
+            pcPanel.style.display = 'block';
+            const newRoomId = generateUUID();
+            document.getElementById('room-id').textContent = newRoomId;
+
+            const shareUrl = window.location.origin + window.location.pathname + '?room=' + newRoomId;
+            QRCode.toCanvas(document.getElementById('qrcode'), shareUrl, { width: 220 }, function (error) {
+                if (error) console.error(error);
+            });
+
+            // 每秒轮询
+            setInterval(async () => {
+                // 拉取文字
+                try {
+                    const res = await fetch(`${BACKEND_URL}/get/${newRoomId}`);
+                    const data = await res.json();
+                    if (data.text) {
+                        document.getElementById('text-result').innerText = data.text;
+                    }
+                } catch(e) {}
+
+                // 拉取文件
+                try {
+                    const res = await fetch(`${BACKEND_URL}/download-url/${newRoomId}`);
+                    const data = await res.json();
+                    if (data.download_url) {
+                        document.getElementById('file-result').innerHTML = 
+                            `<div>文件：${data.filename}</div>
+                             <a class="download-btn" href="${data.download_url}" download="${data.filename}">点击下载</a>`;
+                    }
+                } catch(e) {}
+
+                // 拉取在线人数
+                try {
+                    const res = await fetch(`${BACKEND_URL}/online-count`);
+                    const data = await res.json();
+                    document.getElementById('online-count').textContent = data.count;
+                } catch(e) {}
+            }, 1000);
+        }
+
+        // 手机端逻辑
+        else {
+            document.getElementById('page-title').textContent = "手机端 · 发送";
+            mobilePanel.style.display = 'block';
+        }
+
+        // 提交文字
+        async function submitText() {
+            const text = document.getElementById('text-input').value;
+            const tip = document.getElementById('text-tip');
+            if (!text.trim()) {
+                tip.textContent = '请输入内容';
+                return;
+            }
+            try {
+                const res = await fetch(`${BACKEND_URL}/submit/${roomId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                });
+                if (res.ok) {
+                    tip.textContent = '✅ 发送成功';
+                    setTimeout(() => tip.textContent = '', 2000);
+                } else {
+                    tip.textContent = '❌ 发送失败';
+                }
+            } catch (e) {
+                tip.textContent = '❌ 网络错误';
+            }
+        }
+
+        // 文件上传
+        document.getElementById('file-input').addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            if (file.size > 50 * 1024 * 1024) {
+                document.getElementById('file-tip').textContent = '❌ 文件不能超过50MB';
+                return;
+            }
+
+            const tip = document.getElementById('file-tip');
+            const progressBar = document.getElementById('progress-bar');
+            const progressFill = document.getElementById('progress-fill');
+            tip.textContent = '正在获取上传授权...';
+            progressBar.style.display = 'block';
+            progressFill.style.width = '0%';
+
+            try {
+                const res = await fetch(`${BACKEND_URL}/upload-url/${roomId}?filename=${encodeURIComponent(file.name)}`);
+                const data = await res.json();
+                if (!data.upload_url) throw new Error('获取上传地址失败');
+
+                const xhr = new XMLHttpRequest();
+                xhr.open('PUT', data.upload_url, true);
+                xhr.upload.onprogress = function(e) {
+                    if (e.lengthComputable) {
+                        const percent = Math.round((e.loaded / e.total) * 100);
+                        progressFill.style.width = percent + '%';
+                    }
+                };
+                xhr.onload = function() {
+                    if (xhr.status === 200) {
+                        tip.textContent = '✅ 上传成功，电脑端可下载';
+                        setTimeout(() => {
+                            progressBar.style.display = 'none';
+                            tip.textContent = '';
+                        }, 3000);
+                    } else {
+                        tip.textContent = '❌ 上传失败';
+                        progressBar.style.display = 'none';
+                    }
+                };
+                xhr.onerror = function() {
+                    tip.textContent = '❌ 上传网络错误';
+                    progressBar.style.display = 'none';
+                };
+                xhr.send(file);
+
+            } catch (e) {
+                tip.textContent = '❌ ' + e.message;
+                progressBar.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
